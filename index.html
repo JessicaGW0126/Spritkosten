@@ -29,7 +29,6 @@
 
   const app = initializeApp(firebaseConfig);
   const database = getDatabase(app);
-
   window.firebaseDB = { database, ref, push, get, remove, set };
   window.dispatchEvent(new Event('firebase-ready'));
 </script>
@@ -40,7 +39,6 @@
 <script type="text/babel" data-presets="env,react">
 const { useState, useRef, useEffect } = React;
 
-// --- Helper Functions ---
 function formatDate(date) {
   if(!date) return "";
   const d = new Date(date);
@@ -74,7 +72,6 @@ function numberToWords(num) {
   return result.charAt(0).toUpperCase() + result.slice(1);
 }
 
-// --- Main App Component ---
 function App() {
   const [fb, setFb] = useState(null);
   const [employees, setEmployees] = useState([]);
@@ -82,7 +79,6 @@ function App() {
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [activeTab, setActiveTab] = useState('empfangen');
   
-  // Input States
   const [empfangenAmount, setEmpfangenAmount] = useState('');
   const [ausgabenAmount, setAusgabenAmount] = useState('');
   const [ausgabenMileage, setAusgabenMileage] = useState('');
@@ -90,7 +86,6 @@ function App() {
   const [ausgabenFuelType, setAusgabenFuelType] = useState('');
   const [ausgabenDate, setAusgabenDate] = useState(new Date().toISOString().split('T')[0]);
   
-  // UI & History
   const [showCamera, setShowCamera] = useState(false);
   const [receiptImage, setReceiptImage] = useState('');
   const [history, setHistory] = useState([]);
@@ -110,284 +105,163 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (fb) {
-      loadEmployees();
-      loadVehicles();
-    }
+    if (fb) { loadEmployees(); loadVehicles(); }
   }, [fb]);
 
   useEffect(() => {
     if (fb && selectedEmployee) loadHistory(selectedEmployee);
   }, [fb, selectedEmployee]);
 
-  // Unterschriften-Feld Initialisierung & Skalierung
   useEffect(() => {
     if (activeTab === 'empfangen' && signatureCanvasRef.current) {
       const canvas = signatureCanvasRef.current;
       signaturePadRef.current = new SignaturePad(canvas);
-      
-      const resizeCanvas = () => {
+      const resize = () => {
         const ratio = Math.max(window.devicePixelRatio || 1, 1);
         canvas.width = canvas.offsetWidth * ratio;
         canvas.height = canvas.offsetHeight * ratio;
         canvas.getContext("2d").scale(ratio, ratio);
         signaturePadRef.current.clear();
       };
-      
-      window.addEventListener("resize", resizeCanvas);
-      resizeCanvas();
-      return () => window.removeEventListener("resize", resizeCanvas);
+      window.addEventListener("resize", resize);
+      resize();
+      return () => window.removeEventListener("resize", resize);
     }
   }, [activeTab, selectedEmployee]);
 
-  // Data Loading
   async function loadEmployees() {
     const snap = await fb.get(fb.ref(fb.database, 'employees'));
-    if (snap.exists()) setEmployees(Object.entries(snap.val()).map(([id, v]) => ({ id, ...v })));
-    else setEmployees([]);
+    setEmployees(snap.exists() ? Object.entries(snap.val()).map(([id, v]) => ({ id, ...v })) : []);
   }
   async function loadVehicles() {
     const snap = await fb.get(fb.ref(fb.database, 'vehicles'));
-    if (snap.exists()) setVehicles(Object.entries(snap.val()).map(([id, v]) => ({ id, ...v })));
-    else setVehicles([]);
+    setVehicles(snap.exists() ? Object.entries(snap.val()).map(([id, v]) => ({ id, ...v })) : []);
   }
   async function loadHistory(empId) {
-    const [rSnap, eSnap] = await Promise.all([
-      fb.get(fb.ref(fb.database, 'receipts')),
-      fb.get(fb.ref(fb.database, 'expenses'))
-    ]);
+    const [rSnap, eSnap] = await Promise.all([fb.get(fb.ref(fb.database, 'receipts')), fb.get(fb.ref(fb.database, 'expenses'))]);
     let all = [];
     if (rSnap.exists()) Object.entries(rSnap.val()).forEach(([id, v]) => { if(v.employeeId === empId) all.push({...v, id, type: 'empfangen'}); });
     if (eSnap.exists()) Object.entries(eSnap.val()).forEach(([id, v]) => { if(v.employeeId === empId) all.push({...v, id, type: 'ausgaben'}); });
     setHistory(all.sort((a,b) => new Date(b.date) - new Date(a.date)));
   }
 
-  // Management Actions
-  async function addEmployee() {
-    if (!newEmpName.trim()) return;
-    await fb.push(fb.ref(fb.database, 'employees'), { name: newEmpName.trim() });
-    setNewEmpName('');
-    loadEmployees();
-  }
-  async function addVehicle() {
-    if (!newVehPlate.trim()) return;
-    await fb.push(fb.ref(fb.database, 'vehicles'), { licensePlate: newVehPlate.trim().toUpperCase() });
-    setNewVehPlate('');
-    loadVehicles();
-  }
-  async function deleteEmployee(id, e) {
-    e.stopPropagation();
-    if(confirm("Mitarbeiter wirklich löschen?")) {
-      await fb.remove(fb.ref(fb.database, `employees/${id}`));
-      if(selectedEmployee === id) setSelectedEmployee('');
-      loadEmployees();
-    }
-  }
-  async function deleteVehicle(id, e) {
-    e.stopPropagation();
-    if(confirm("Fahrzeug wirklich löschen?")) {
-      await fb.remove(fb.ref(fb.database, `vehicles/${id}`));
-      loadVehicles();
-    }
-  }
-  async function deleteHistoryItem(item) {
-    if(confirm("Diesen Eintrag wirklich löschen?")) {
-      const path = item.type === 'empfangen' ? 'receipts' : 'expenses';
-      await fb.remove(fb.ref(fb.database, `${path}/${item.id}`));
-      loadHistory(selectedEmployee);
-    }
-  }
+  async function addEmployee() { if(newEmpName.trim()) { await fb.push(fb.ref(fb.database, 'employees'), { name: newEmpName.trim() }); setNewEmpName(''); loadEmployees(); } }
+  async function addVehicle() { if(newVehPlate.trim()) { await fb.push(fb.ref(fb.database, 'vehicles'), { licensePlate: newVehPlate.trim().toUpperCase() }); setNewVehPlate(''); loadVehicles(); } }
+  async function deleteEmployee(id, e) { e.stopPropagation(); if(confirm("Mitarbeiter löschen?")) { await fb.remove(fb.ref(fb.database, `employees/${id}`)); if(selectedEmployee === id) setSelectedEmployee(''); loadEmployees(); } }
+  async function deleteVehicle(id, e) { e.stopPropagation(); if(confirm("Fahrzeug löschen?")) { await fb.remove(fb.ref(fb.database, `vehicles/${id}`)); loadVehicles(); } }
+  async function deleteHistoryItem(item) { if(confirm("Eintrag löschen?")) { await fb.remove(fb.ref(fb.database, `${item.type === 'empfangen' ? 'receipts' : 'expenses'}/${item.id}`)); loadHistory(selectedEmployee); } }
 
-  // Camera Logic
-  async function startCamera() {
-    setShowCamera(true);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
-    } catch (e) { alert("Kamera Zugriff verweigert"); setShowCamera(false); }
-  }
-  function capturePhoto() {
-    const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
-    setReceiptImage(canvas.toDataURL('image/jpeg'));
-    stopCamera();
-  }
-  function stopCamera() {
-    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-    setShowCamera(false);
-  }
+  async function startCamera() { setShowCamera(true); try { const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); streamRef.current = s; if (videoRef.current) videoRef.current.srcObject = s; } catch (e) { setShowCamera(false); } }
+  function capturePhoto() { const c = document.createElement('canvas'); c.width = videoRef.current.videoWidth; c.height = videoRef.current.videoHeight; c.getContext('2d').drawImage(videoRef.current, 0, 0); setReceiptImage(c.toDataURL('image/jpeg')); stopCamera(); }
+  function stopCamera() { if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop()); setShowCamera(false); }
 
-  // Save Handlers
-  async function handleSaveEmpfangen() {
-    if(!empfangenAmount || signaturePadRef.current.isEmpty()) return alert("Betrag und Unterschrift fehlen!");
-    const item = {
-      employeeId: selectedEmployee,
-      amount: parseFloat(empfangenAmount),
-      signature: signaturePadRef.current.toDataURL(),
-      date: new Date().toISOString(),
-      type: 'empfangen'
-    };
-    await fb.push(fb.ref(fb.database, 'receipts'), item);
-    generateReceiptPDF(item);
-    setEmpfangenAmount('');
-    signaturePadRef.current.clear();
-    loadHistory(selectedEmployee);
-  }
-
-  async function handleSaveAusgaben() {
-    if(!ausgabenAmount || !ausgabenVehicle || !ausgabenFuelType) return alert("Alle Felder ausfüllen!");
-    const item = {
-      employeeId: selectedEmployee,
-      vehicleId: ausgabenVehicle,
-      amount: parseFloat(ausgabenAmount),
-      mileage: ausgabenMileage,
-      fuelType: ausgabenFuelType,
-      date: new Date(ausgabenDate).toISOString(),
-      receiptImage,
-      type: 'ausgaben'
-    };
-    await fb.push(fb.ref(fb.database, 'expenses'), item);
-    generateExpensePDF(item);
-    setAusgabenAmount(''); setAusgabenMileage(''); setAusgabenVehicle(''); setAusgabenFuelType(''); setReceiptImage('');
-    loadHistory(selectedEmployee);
-  }
-
-  // PDF & Excel
   function generateReceiptPDF(item) {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    const emp = employees.find(e => e.id === item.employeeId);
-    doc.setFontSize(22);
-    doc.text("GW Bauservice", 105, 20, { align: "center" });
-    doc.setFontSize(14);
-    doc.text("Spritgeld Quittung", 105, 30, { align: "center" });
-    doc.line(20, 35, 190, 35);
-    doc.setFontSize(12);
-    doc.text(`Datum: ${formatDate(item.date)}`, 20, 50);
-    doc.text(`Herausgeber: GW Bauservice`, 20, 60);
-    doc.text(`Empfänger: ${emp?.name || 'Mitarbeiter'}`, 20, 80);
-    doc.setFont("helvetica", "bold");
-    doc.text(`Betrag: ${parseFloat(item.amount).toFixed(2)} EUR`, 20, 100);
-    doc.setFont("helvetica", "normal");
-    doc.text(`In Worten: ${numberToWords(item.amount)}`, 20, 110);
-    if (item.signature) {
-      doc.text("Unterschrift:", 20, 140);
-      doc.addImage(item.signature, 'PNG', 20, 145, 60, 30);
-    }
-    doc.save(`Quittung_${emp?.name || 'Mitarbeiter'}.pdf`);
+    const { jsPDF } = window.jspdf; const doc = new jsPDF(); const emp = employees.find(e => e.id === item.employeeId);
+    doc.setFontSize(22); doc.text("GW Bauservice", 105, 20, { align: "center" });
+    doc.setFontSize(14); doc.text("Spritgeld Quittung", 105, 30, { align: "center" });
+    doc.line(20, 35, 190, 35); doc.setFontSize(12);
+    doc.text(`Datum: ${formatDate(item.date)}`, 20, 50); doc.text(`Ort: Zahna`, 20, 60);
+    doc.text(`Herausgeber: GW Bauservice`, 20, 70); doc.text(`Empfänger: ${emp?.name || ''}`, 20, 90);
+    doc.setFont("helvetica", "bold"); doc.text(`Betrag: ${parseFloat(item.amount).toFixed(2)} EUR`, 20, 110);
+    doc.setFont("helvetica", "normal"); doc.text(`In Worten: ${numberToWords(item.amount)}`, 20, 120);
+    if (item.signature) { doc.text("Unterschrift:", 20, 150); doc.addImage(item.signature, 'PNG', 20, 155, 60, 30); }
+    doc.save(`Quittung_${emp?.name}.pdf`);
   }
 
   function generateExpensePDF(item) {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    const emp = employees.find(e => e.id === item.employeeId);
-    const veh = vehicles.find(v => v.id === item.vehicleId);
-    doc.setFontSize(22);
-    doc.text("GW Bauservice", 105, 20, { align: "center" });
-    doc.setFontSize(14);
-    doc.text("Tankbeleg", 105, 30, { align: "center" });
-    doc.autoTable({
-      startY: 50,
-      head: [['Feld', 'Details']],
-      body: [
-        ['Datum', formatDate(item.date)],
-        ['Mitarbeiter', emp?.name || ''],
-        ['Fahrzeug', veh?.licensePlate || ''],
-        ['KM-Stand', item.mileage],
-        ['Kraftstoff', item.fuelType],
-        ['Betrag', `${parseFloat(item.amount).toFixed(2)} EUR`]
-      ],
-    });
-    if (item.receiptImage) {
-      doc.addPage();
-      doc.addImage(item.receiptImage, 'JPEG', 20, 20, 170, 120);
-    }
-    doc.save(`Tankbeleg_${emp?.name || 'Mitarbeiter'}.pdf`);
+    const { jsPDF } = window.jspdf; const doc = new jsPDF(); const emp = employees.find(e => e.id === item.employeeId); const veh = vehicles.find(v => v.id === item.vehicleId);
+    doc.setFontSize(22); doc.text("GW Bauservice", 105, 20, { align: "center" });
+    doc.setFontSize(14); doc.text("Tankbeleg", 105, 30, { align: "center" });
+    doc.autoTable({ startY: 50, head: [['Feld', 'Details']], body: [['Datum', formatDate(item.date)], ['Mitarbeiter', emp?.name || ''], ['Fahrzeug', veh?.licensePlate || ''], ['KM-Stand', item.mileage], ['Kraftstoff', item.fuelType], ['Betrag', `${parseFloat(item.amount).toFixed(2)} EUR`]] });
+    if (item.receiptImage) { doc.addPage(); doc.addImage(item.receiptImage, 'JPEG', 20, 20, 170, 120); }
+    doc.save(`Tankbeleg_${emp?.name}.pdf`);
   }
 
-  function exportExcel() {
-    const stats = calculateStats();
-    const data = stats.items.map(i => ({
-      Datum: formatDate(i.date),
-      Typ: i.type === 'empfangen' ? 'Erhalt' : 'Tankvorgang',
-      Betrag: i.amount,
-      Details: i.type === 'ausgaben' ? i.fuelType : 'Spritgeld'
-    }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Übersicht");
-    XLSX.writeFile(wb, "Spritkosten_Uebersicht.xlsx");
+  async function handleSaveEmpfangen() {
+    if(!empfangenAmount || signaturePadRef.current.isEmpty()) return alert("Daten unvollständig!");
+    const item = { employeeId: selectedEmployee, amount: parseFloat(empfangenAmount), signature: signaturePadRef.current.toDataURL(), date: new Date().toISOString(), type: 'empfangen' };
+    await fb.push(fb.ref(fb.database, 'receipts'), item);
+    generateReceiptPDF(item); setEmpfangenAmount(''); signaturePadRef.current.clear(); loadHistory(selectedEmployee);
+  }
+
+  async function handleSaveAusgaben() {
+    if(!ausgabenAmount || !ausgabenVehicle || !ausgabenFuelType) return alert("Daten unvollständig!");
+    const item = { employeeId: selectedEmployee, vehicleId: ausgabenVehicle, amount: parseFloat(ausgabenAmount), mileage: ausgabenMileage, fuelType: ausgabenFuelType, date: new Date(ausgabenDate).toISOString(), receiptImage, type: 'ausgaben' };
+    await fb.push(fb.ref(fb.database, 'expenses'), item);
+    generateExpensePDF(item); setAusgabenAmount(''); setAusgabenMileage(''); setAusgabenVehicle(''); setAusgabenFuelType(''); setReceiptImage(''); loadHistory(selectedEmployee);
   }
 
   function calculateStats() {
-    const start = new Date(startDate); start.setHours(0,0,0,0);
-    const end = new Date(endDate); end.setHours(23,59,59,999);
-    const filtered = history.filter(i => {
-      const d = new Date(i.date);
-      return d >= start && d <= end;
-    });
+    const s = new Date(startDate); s.setHours(0,0,0,0); const e = new Date(endDate); e.setHours(23,59,59,999);
+    const filtered = history.filter(i => { const d = new Date(i.date); return d >= s && d <= e; });
     const emp = filtered.filter(i => i.type === 'empfangen').reduce((a,b) => a + b.amount, 0);
     const aus = filtered.filter(i => i.type === 'ausgaben').reduce((a,b) => a + b.amount, 0);
     return { emp, aus, diff: emp - aus, items: filtered };
   }
 
-  if (!fb) return <div className="flex h-screen items-center justify-center">Lade Firebase...</div>;
+  function exportExcel() {
+    const stats = calculateStats();
+    const data = stats.items.map(i => {
+        const v = vehicles.find(veh => veh.id === i.vehicleId);
+        return {
+            Datum: formatDate(i.date),
+            Typ: i.type === 'empfangen' ? 'Erhalt' : 'Ausgabe',
+            Betrag: i.amount,
+            Kennzeichen: v ? v.licensePlate : '-',
+            KM_Stand: i.mileage || '-',
+            Kraftstoff: i.fuelType || 'Spritgeld'
+        };
+    });
+    const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Übersicht"); XLSX.writeFile(wb, "Spritkosten.xlsx");
+  }
 
+  function exportPDF() {
+    const { jsPDF } = window.jspdf; const doc = new jsPDF(); const stats = calculateStats(); const emp = employees.find(e => e.id === selectedEmployee);
+    doc.text(`Übersicht: ${emp?.name || ''}`, 20, 20);
+    doc.autoTable({ startY: 30, head: [['Datum', 'Typ', 'Betrag', 'KFZ', 'KM', 'Sprit']], body: stats.items.map(i => [formatDate(i.date), i.type === 'empfangen' ? 'Erhalt' : 'Ausgabe', i.amount.toFixed(2), vehicles.find(v => v.id === i.vehicleId)?.licensePlate || '-', i.mileage || '-', i.fuelType || '-']) });
+    doc.save("Uebersicht.pdf");
+  }
+
+  if (!fb) return <div className="flex h-screen items-center justify-center">Lade...</div>;
   const stats = calculateStats();
 
   return (
     <div className="max-w-4xl mx-auto p-4 pb-20">
       <header className="text-center mb-8">
-        <img src="https://i.ibb.co/6R0D5x0/GW-Logo.png" alt="GW Bauservice" className="mx-auto h-32 mb-4" />
+        <img src="https://i.ibb.co/C0mXN3F/GW-Logo.png" alt="GW Bauservice" className="mx-auto h-24 mb-4 object-contain" />
         <h1 className="text-3xl font-bold text-gray-800">Spritkosten</h1>
       </header>
 
-      {/* Mitarbeiterauswahl */}
       <section className="bg-white p-6 rounded-2xl shadow-sm border mb-6">
-        <h2 className="text-lg font-semibold mb-4 text-center">Mitarbeiter</h2>
+        <h2 className="text-lg font-semibold mb-4 text-center">Mitarbeiter auswählen</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
           {employees.map(e => (
-            <div 
-              key={e.id} 
-              onClick={() => setSelectedEmployee(e.id)}
-              className={`p-4 rounded-xl border-2 cursor-pointer flex justify-between items-center transition-all ${selectedEmployee === e.id ? 'border-blue-500 bg-blue-50' : 'border-gray-100 hover:border-blue-200'}`}
-            >
+            <div key={e.id} onClick={() => setSelectedEmployee(e.id)} className={`p-4 rounded-xl border-2 cursor-pointer flex justify-between items-center transition-all ${selectedEmployee === e.id ? 'border-blue-500 bg-blue-50' : 'border-gray-100'}`}>
               <span className="font-medium">{e.name}</span>
-              <button onClick={(event) => deleteEmployee(e.id, event)} className="text-red-400 hover:text-red-600">🗑️</button>
+              <button onClick={(event) => deleteEmployee(e.id, event)} className="text-red-400">🗑️</button>
             </div>
           ))}
         </div>
         <div className="flex gap-2">
-          <input value={newEmpName} onChange={e => setNewEmpName(e.target.value)} placeholder="Neuer Mitarbeiter Name" className="flex-1 p-3 bg-gray-50 rounded-lg outline-none" />
+          <input value={newEmpName} onChange={e => setNewEmpName(e.target.value)} placeholder="Name..." className="flex-1 p-3 bg-gray-50 rounded-lg border outline-none" />
           <button onClick={addEmployee} className="bg-blue-600 text-white px-6 rounded-lg font-bold">+</button>
         </div>
       </section>
 
       {selectedEmployee && (
         <>
-          {/* Tabs */}
           <div className="flex bg-white p-1 rounded-xl shadow-sm border mb-6">
             {['empfangen', 'ausgaben', 'uebersicht'].map(t => (
-              <button key={t} onClick={() => setActiveTab(t)} className={`flex-1 py-3 rounded-lg font-bold capitalize transition-all ${activeTab === t ? 'bg-blue-600 text-white' : 'text-gray-500'}`}>
-                {t}
-              </button>
+              <button key={t} onClick={() => setActiveTab(t)} className={`flex-1 py-3 rounded-lg font-bold capitalize transition-all ${activeTab === t ? 'bg-blue-600 text-white' : 'text-gray-500'}`}>{t}</button>
             ))}
           </div>
 
           <div className="bg-white p-6 rounded-2xl shadow-sm border min-h-[400px]">
             {activeTab === 'empfangen' && (
               <div className="space-y-6">
-                <input type="number" value={empfangenAmount} onChange={e => setEmpfangenAmount(e.target.value)} placeholder="Betrag in €" className="w-full p-4 bg-gray-50 rounded-xl text-2xl font-bold border-2 border-transparent focus:border-blue-400 outline-none" />
-                <div>
-                  <label className="block text-sm font-bold text-gray-600 mb-2">Unterschrift</label>
-                  <div className="border-2 rounded-xl bg-gray-50 overflow-hidden">
-                    <canvas ref={signatureCanvasRef} className="w-full h-48 touch-none"></canvas>
-                  </div>
-                  <button onClick={() => signaturePadRef.current.clear()} className="mt-2 text-sm text-blue-600">Löschen</button>
-                </div>
+                <input type="number" value={empfangenAmount} onChange={e => setEmpfangenAmount(e.target.value)} placeholder="Betrag €" className="w-full p-4 bg-gray-50 rounded-xl text-2xl font-bold border outline-none" />
+                <div className="border-2 rounded-xl bg-gray-50 overflow-hidden"><canvas ref={signatureCanvasRef} className="w-full h-48 touch-none"></canvas></div>
+                <button onClick={() => signaturePadRef.current.clear()} className="text-sm text-blue-600">Löschen</button>
                 <button onClick={handleSaveEmpfangen} className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold shadow-lg">Speichern & Quittung</button>
               </div>
             )}
@@ -397,67 +271,30 @@ function App() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <select value={ausgabenVehicle} onChange={e => setAusgabenVehicle(e.target.value)} className="w-full p-3 bg-gray-50 rounded-lg border">
-                      <option value="">Fahrzeug wählen...</option>
+                      <option value="">Fahrzeug...</option>
                       {vehicles.map(v => <option key={v.id} value={v.id}>{v.licensePlate}</option>)}
                     </select>
-                    <div className="flex gap-1">
-                        <input value={newVehPlate} onChange={e => setNewVehPlate(e.target.value)} placeholder="Neues Kennzeichen" className="flex-1 p-2 bg-gray-50 rounded text-xs border" />
-                        <button onClick={addVehicle} className="bg-green-600 text-white px-2 rounded">+</button>
-                        {ausgabenVehicle && <button onClick={(e) => deleteVehicle(ausgabenVehicle, e)} className="bg-red-500 text-white px-2 rounded">🗑️</button>}
-                    </div>
+                    <div className="flex gap-1"><input value={newVehPlate} onChange={e => setNewVehPlate(e.target.value)} placeholder="KFZ..." className="flex-1 p-2 bg-gray-50 rounded border text-xs" /><button onClick={addVehicle} className="bg-green-600 text-white px-2 rounded">+</button>{ausgabenVehicle && <button onClick={(e) => deleteVehicle(ausgabenVehicle, e)} className="bg-red-500 text-white px-2 rounded">🗑️</button>}</div>
                   </div>
                   <input type="date" value={ausgabenDate} onChange={e => setAusgabenDate(e.target.value)} className="w-full p-3 bg-gray-50 rounded-lg border" />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <input type="number" value={ausgabenMileage} onChange={e => setAusgabenMileage(e.target.value)} placeholder="KM-Stand" className="p-3 bg-gray-50 rounded-lg border" />
-                  <input type="number" value={ausgabenAmount} onChange={e => setAusgabenAmount(e.target.value)} placeholder="Betrag €" className="p-3 bg-gray-50 rounded-lg border" />
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {['Diesel', 'Benzin', 'Ad-Blue'].map(f => (
-                    <button key={f} onClick={() => setAusgabenFuelType(f)} className={`p-3 rounded-lg font-bold border-2 ${ausgabenFuelType === f ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-gray-100 text-gray-500'}`}>{f}</button>
-                  ))}
-                </div>
-                <div className="flex flex-col items-center">
-                  {receiptImage ? <img src={receiptImage} className="h-32 rounded mb-2" /> : null}
-                  <button onClick={startCamera} className="w-full py-6 border-2 border-dashed rounded-xl text-gray-400 hover:text-blue-500">📷 Tankbeleg fotografieren</button>
-                </div>
-                <button onClick={handleSaveAusgaben} className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold shadow-lg">Vorgang abschließen</button>
+                <div className="grid grid-cols-2 gap-4"><input type="number" value={ausgabenMileage} onChange={e => setAusgabenMileage(e.target.value)} placeholder="KM-Stand" className="p-3 bg-gray-50 rounded-lg border" /><input type="number" value={ausgabenAmount} onChange={e => setAusgabenAmount(e.target.value)} placeholder="Betrag €" className="p-3 bg-gray-50 rounded-lg border" /></div>
+                <div className="grid grid-cols-3 gap-2">{['Diesel', 'Benzin', 'Ad-Blue'].map(f => (<button key={f} onClick={() => setAusgabenFuelType(f)} className={`p-3 rounded-lg font-bold border-2 ${ausgabenFuelType === f ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-gray-100'}`}>{f}</button>))}</div>
+                <button onClick={startCamera} className="w-full py-6 border-2 border-dashed rounded-xl text-gray-400">{receiptImage ? "✓ Bild gespeichert" : "📷 Beleg fotografieren"}</button>
+                <button onClick={handleSaveAusgaben} className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold shadow-lg">Speichern</button>
               </div>
             )}
 
             {activeTab === 'uebersicht' && (
               <div className="space-y-6">
-                <div className="grid grid-cols-2 gap-2">
-                  <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 bg-gray-50 rounded border" />
-                  <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 bg-gray-50 rounded border" />
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <div className="bg-green-50 p-3 rounded-lg border">
-                    <p className="text-[10px] font-bold text-green-600">Erhalt</p>
-                    <p className="font-bold">{stats.emp.toFixed(2)}€</p>
-                  </div>
-                  <div className="bg-red-50 p-3 rounded-lg border">
-                    <p className="text-[10px] font-bold text-red-600">Ausgabe</p>
-                    <p className="font-bold">{stats.aus.toFixed(2)}€</p>
-                  </div>
-                  <div className="bg-blue-50 p-3 rounded-lg border">
-                    <p className="text-[10px] font-bold text-blue-600">Saldo</p>
-                    <p className="font-bold">{stats.diff.toFixed(2)}€</p>
-                  </div>
-                </div>
-                <button onClick={exportExcel} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold">Excel Export</button>
+                <div className="grid grid-cols-2 gap-2"><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 bg-gray-50 rounded border" /><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 bg-gray-50 rounded border" /></div>
+                <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold"><div className="bg-green-50 p-3 rounded border">Erhalt: {stats.emp.toFixed(2)}€</div><div className="bg-red-50 p-3 rounded border">Ausgabe: {stats.aus.toFixed(2)}€</div><div className="bg-blue-50 p-3 rounded border">Saldo: {stats.diff.toFixed(2)}€</div></div>
+                <div className="flex gap-2"><button onClick={exportExcel} className="flex-1 bg-green-600 text-white py-3 rounded-lg font-bold">Excel</button><button onClick={exportPDF} className="flex-1 bg-red-600 text-white py-3 rounded-lg font-bold">PDF</button></div>
                 <div className="space-y-2 max-h-[300px] overflow-auto">
                   {stats.items.map(item => (
-                    <div key={item.id} className="p-3 bg-gray-50 rounded-lg flex items-center justify-between border">
-                      <div className="text-xs">
-                        <p className="font-bold">{formatDate(item.date)}</p>
-                        <p className="text-gray-500">{item.type === 'empfangen' ? 'Erhalt' : 'Ausgabe'}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`font-bold ${item.type === 'empfangen' ? 'text-green-600' : 'text-red-600'}`}>{item.amount.toFixed(2)}€</span>
-                        <button onClick={() => item.type === 'empfangen' ? generateReceiptPDF(item) : generateExpensePDF(item)} className="p-1 bg-white border rounded">PDF</button>
-                        <button onClick={() => deleteHistoryItem(item)} className="p-1 bg-white border rounded text-red-500">🗑️</button>
-                      </div>
+                    <div key={item.id} className="p-3 bg-gray-50 rounded flex items-center justify-between border text-xs">
+                      <div><p className="font-bold">{formatDate(item.date)}</p><p className="text-gray-400">{vehicles.find(v => v.id === item.vehicleId)?.licensePlate || 'Spritgeld'}</p></div>
+                      <div className="flex items-center gap-2"><span className="font-bold">{item.amount.toFixed(2)}€</span><button onClick={() => item.type === 'empfangen' ? generateReceiptPDF(item) : generateExpensePDF(item)} className="p-1 border rounded">PDF</button><button onClick={() => deleteHistoryItem(item)} className="p-1 border rounded text-red-500">🗑️</button></div>
                     </div>
                   ))}
                 </div>
@@ -467,14 +304,9 @@ function App() {
         </>
       )}
 
-      {/* Kamera Modal */}
       {showCamera && (
-        <div className="fixed inset-0 bg-black z-50 flex flex-col">
-          <video ref={videoRef} autoPlay playsInline className="flex-1 object-cover" />
-          <div className="flex justify-center gap-6 py-10 bg-black">
-            <button onClick={stopCamera} className="text-white bg-red-600 px-6 py-2 rounded-full font-bold">Abbruch</button>
-            <button onClick={capturePhoto} className="w-20 h-20 bg-white rounded-full border-4 border-gray-400 active:scale-95"></button>
-          </div>
+        <div className="fixed inset-0 bg-black z-50 flex flex-col"><video ref={videoRef} autoPlay playsInline className="flex-1 object-cover" />
+          <div className="flex justify-center gap-6 py-10 bg-black"><button onClick={stopCamera} className="text-white bg-red-600 px-6 py-2 rounded-full font-bold">Abbruch</button><button onClick={capturePhoto} className="w-20 h-20 bg-white rounded-full border-4 border-gray-400"></button></div>
         </div>
       )}
     </div>
