@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GW Bauservice - Spritkostenverwaltung</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getDatabase, ref, push, get, query, orderByChild } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyB2KRg-aaN03pnRbhV6IoF-MGO6g1ezngI",
+    authDomain: "spritkosten-e94fd.firebaseapp.com",
+    databaseURL: "https://spritkosten-e94fd-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "spritkosten-e94fd",
+    storageBucket: "spritkosten-e94fd.firebasestorage.app",
+    messagingSenderId: "1044644907793",
+    appId: "1:1044644907793:web:136c51669986ebb4cf5ab0",
+    measurementId: "G-HC4K2N649J"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const database = getDatabase(app);
+
+  window.firebaseDB = { database, ref, push, get, query, orderByChild };
+  window.dispatchEvent(new Event('firebase-ready'));
+</script>
+</head>
+<body>
+<div id="root">
+  <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;">
+    <p>Lade Anwendung...</p>
+  </div>
+</div>
+
+<script type="text/babel" data-presets="env,react">
+const { useState, useRef, useEffect } = React;
+
+function waitForFirebase() {
+  return new Promise((resolve) => {
+    if (window.firebaseDB) {
+      resolve(window.firebaseDB);
+    } else {
+      window.addEventListener('firebase-ready', () => resolve(window.firebaseDB));
+    }
+  });
+}
+
+function numberToWords(num) {
+  const ones = ['', 'eins', 'zwei', 'drei', 'vier', 'fünf', 'sechs', 'sieben', 'acht', 'neun'];
+  const teens = ['zehn', 'elf', 'zwölf', 'dreizehn', 'vierzehn', 'fünfzehn', 'sechzehn', 'siebzehn', 'achtzehn', 'neunzehn'];
+  const tens = ['', '', 'zwanzig', 'dreißig', 'vierzig', 'fünfzig', 'sechzig', 'siebzig', 'achtzig', 'neunzig'];
+  if (num === 0) return 'null Euro';
+  let euroValue = Math.floor(num);
+  const cents = Math.round((num - euroValue) * 100);
+  function convertUnder1000(n) {
+    if (n === 0) return '';
+    if (n < 10) return ones[n];
+    if (n < 20) return teens[n - 10];
+    if (n < 100) {
+      const ten = Math.floor(n / 10);
+      const one = n % 10;
+      return one > 0 ? `${ones[one]}und${tens[ten]}` : tens[ten];
+    }
+    if (n < 1000) {
+      const hundred = Math.floor(n / 100);
+      const rest = n % 100;
+      return `${ones[hundred]}hundert${rest > 0 ? convertUnder1000(rest) : ''}`;
+    }
+    return '';
+  }
+  let result = '';
+  if (euroValue >= 1000) {
+    const thousands = Math.floor(euroValue / 1000);
+    result += `${convertUnder1000(thousands)}tausend `;
+    euroValue %= 1000;
+  }
+  if (euroValue > 0) result += `${convertUnder1000(euroValue)} `;
+  result += 'Euro';
+  if (cents > 0) result += ` und ${cents} Cent`;
+  return result.charAt(0).toUpperCase() + result.slice(1);
+}
+
+function formatDate(date) {
+  const d = new Date(date);
+  return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
+}
+
+function App() {
+  const [fbReady, setFbReady] = useState(false);
+  const [fb, setFb] = useState(null);
+  const [employees, setEmployees] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [selectedEmployee, setSelectedEmployee] = useState('');
+  const [activeTab, setActiveTab] = useState('empfangen');
+  const [empfangenAmount, setEmpfangenAmount] = useState('');
+  const signaturePadRef = useRef(null);
+  const signatureCanvasRef = useRef(null);
+  const [ausgabenVehicle, setAusgabenVehicle] = useState('');
+  const [ausgabenMileage, setAusgabenMileage] = useState('');
+  const [ausgabenAmount, setAusgabenAmount] = useState('');
+  const [ausgabenFuelType, setAusgabenFuelType] = useState('');
+  const [showFuelPopup, setShowFuelPopup] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const [receiptImage, setReceiptImage] = useState('');
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const today = new Date();
+  const yearStart = new Date(today.getFullYear(), 0, 1);
+  const [startDate, setStartDate] = useState(yearStart.toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(today.toISOString().split('T')[0]);
+  const [history, setHistory] = useState([]);
+  const [newEmployeeName, setNewEmployeeName] = useState('');
+  const [newVehiclePlate, setNewVehiclePlate] = useState('');
+  const [showAddEmployee, setShowAddEmployee] = useState(false);
+  const [showAddVehicle, setShowAddVehicle] = useState(false);
+
+  useEffect(() => {
+    waitForFirebase().then((firebase) => {
+      setFb(firebase);
+      setFbReady(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (fbReady) {
+      loadEmployees();
+      loadVehicles();
+    }
+  }, [fbReady]);
+
+  useEffect(() => {
+    if (selectedEmployee && fbReady) loadHistory(selectedEmployee);
+  }, [selectedEmployee, fbReady]);
+
+  useEffect(() => {
+    if (signatureCanvasRef.current && activeTab === 'empfangen') {
+      signaturePadRef.current = new SignaturePad(signatureCanvasRef.current, {
+        backgroundColor: 'rgb(255, 255, 255)',
+        penColor: 'rgb(0, 0, 0)',
+      });
+    }
+  }, [activeTab, selectedEmployee]);
+
+  useEffect(() => {
+    if (showCamera) {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+        .then(stream => {
+          streamRef.current = stream;
+          if (videoRef.current) videoRef.current.srcObject = stream;
+        })
+        .catch(err => {
+          alert('Kamera konnte nicht geöffnet werden: ' + err.message);
+          setShowCamera(false);
+        });
+    } else {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
+    }
+  }, [showCamera]);
+
+  async function loadEmployees() {
+    try {
+      const snap = await fb.get(fb.ref(fb.database, 'employees'));
+      if (snap.exists()) {
+        const data = snap.val();
+        setEmployees(Object.entries(data).map(([id, v]) => ({ id, name: v.name })));
+      }
+    } catch (e) { console.error(e); }
+  }
+
+  async function loadVehicles() {
+    try {
+      const snap = await fb.get(fb.ref(fb.database, 'vehicles'));
+      if (snap.exists()) {
+        const data = snap.val();
+        setVehicles(Object.entries(data).map(([id, v]) => ({ id, licensePlate: v.licensePlate })));
+      }
+    } catch (e) { console.error(e); }
+  }
+
+  async function loadHistory(employeeId) {
+    try {
+      const [rSnap, eSnap] = await Promise.all([
+        fb.get(fb.ref(fb.database, 'receipts')),
+        fb.get(fb.ref(fb.database, 'expenses'))
+      ]);
+      const all = [];
+      if (rSnap.exists()) {
+        Object.entries(rSnap.val()).forEach(([id, v]) => {
+          if (v.employeeId === employeeId) all.push({ ...v, id, type: 'empfangen' });
+        });
+      }
+      if (eSnap.exists()) {
+        Object.entries(eSnap.val()).forEach(([id, v]) => {
+          if (v.employeeId === employeeId) all.push({ ...v, id, type: 'ausgaben' });
+        });
+      }
+      all.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setHistory(all);
+    } catch (e) { console.error(e); }
+  }
+
+  async function addEmployee() {
+    if (!newEmployeeName.trim()) return;
+    try {
+      await fb.push(fb.ref(fb.database, 'employees'), { name: newEmployeeName.trim() });
+      setNewEmployeeName('');
+      setShowAddEmployee(false);
+      loadEmployees();
+    } catch (e) { console.error(e); }
+  }
+
+  async function addVehicle() {
+    if (!newVehiclePlate.trim()) return;
+    try {
+      await fb.push(fb.ref(fb.database, 'vehicles'), { licensePlate: newVehiclePlate.trim().toUpperCase() });
+      setNewVehiclePlate('');
+      setShowAddVehicle(false);
+      loadVehicles();
+    } catch (e) { console.error(e); }
+  }
+
+  async function saveEmpfangen() {
+    if (!selectedEmployee || !empfangenAmount || signaturePadRef.current?.isEmpty()) {
+      alert('Bitte alle Felder ausfüllen und unterschreiben');
+      return;
+    }
+    try {
+      const signatureData = signaturePadRef.current.toDataURL();
+      const amount = parseFloat(empfangenAmount.replace(',', '.'));
+      await fb.push(fb.ref(fb.database, 'receipts'), {
+        employeeId: selectedEmployee,
+        amount,
+        signature: signatureData,
+        date: new Date().toISOString(),
+        type: 'empfangen'
+      });
+      generateEmpfangenPDF(amount, signatureData);
+      setEmpfangenAmount('');
+      signaturePadRef.current.clear();
+      loadHistory(selectedEmployee);
+      alert('Empfangen erfolgreich gespeichert!');
+    } catch (e) {
+      console.error(e);
+      alert('Fehler beim Speichern: ' + e.message);
+    }
+  }
+
+  function generateEmpfangenPDF(amount, signature) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const employee = employees.find(e => e.id === selectedEmployee);
+    const currentDate = formatDate(new Date());
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text('GW Bauservice', 105, 20, { align: 'center' });
+    doc.setFontSize(14);
+    doc.text('Spritgeld Quittung', 105, 30, { align: 'center' });
+    doc.setLineWidth(0.5);
+    doc.line(20, 35, 190, 35);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Datum: ${currentDate}`, 20, 50);
+    doc.text(`Ort: Zahna`, 20, 60);
+    doc.text(`Empfänger: ${employee?.name || ''}`, 20, 80);
+    doc.text(`Betrag: ${amount.toFixed(2).replace('.', ',')} EUR`, 20, 100);
+    doc.text(`in Worten: ${numberToWords(amount)}`, 20, 110);
+    doc.text(`Verwendungszweck: Spritgeld`, 20, 130);
+    doc.text('Unterschrift:', 20, 160);
+    if (signature) doc.addImage(signature, 'PNG', 20, 170, 60, 30);
+    doc.setFontSize(10);
+    doc.text('Herausgeber: GW Bauservice', 105, 250, { align: 'center' });
+    doc.save(`Empfangen_${employee?.name || 'unbekannt'}_${currentDate}.pdf`);
+  }
+
+  function capturePhoto() {
+    if (!videoRef.current) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
+    setReceiptImage(canvas.toDataURL('image/jpeg', 0.8));
+    setShowCamera(false);
+  }
+
+  async function saveAusgaben() {
+    if (!selectedEmployee || !ausgabenVehicle || !ausgabenMileage || !ausgabenAmount || !ausgabenFuelType) {
+      alert('Bitte alle Felder ausfüllen');
+      return;
+    }
+    try {
+      const expenseData = {
+        employeeId: selectedEmployee,
+        vehicleId: ausgabenVehicle,
+        mileage: parseFloat(ausgabenMileage),
+        amount: parseFloat(ausgabenAmount.replace(',', '.')),
+        fuelType: ausgabenFuelType,
+        receiptImage,
+        date: new Date().toISOString(),
+        type: 'ausgaben'
+      };
+      await fb.push(fb.ref(fb.database, 'expenses'), expenseData);
+      generateAusgabenPDF(expenseData);
+      setAusgabenVehicle('');
+      setAusgabenMileage('');
+      setAusgabenAmount('');
+      setAusgabenFuelType('');
+      setReceiptImage('');
+      loadHistory(selectedEmployee);
+      alert('Ausgaben erfolgreich gespeichert!');
+    } catch (e) {
+      console.error(e);
+      alert('Fehler beim Speichern: ' + e.message);
+    }
+  }
+
+  function generateAusgabenPDF(data) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const employee = employees.find(e => e.id === data.employeeId);
+    const vehicle = vehicles.find(v => v.id === data.vehicleId);
+    const currentDate = formatDate(data.date);
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text('GW Bauservice', 105, 20, { align: 'center' });
+    doc.setFontSize(14);
+    doc.text('Tankbeleg Dokumentation', 105, 30, { align: 'center' });
+    doc.setLineWidth(0.5);
+    doc.line(20, 35, 190, 35);
+    doc.autoTable({
+      startY: 50,
+      head: [['Feld', 'Wert']],
+      body: [
+        ['Datum', currentDate],
+        ['Ort', 'Zahna'],
+        ['Mitarbeiter', employee?.name || ''],
+        ['Fahrzeug', vehicle?.licensePlate || ''],
+        ['Kilometerstand', data.mileage.toString()],
+        ['Betrag', `${data.amount.toFixed(2).replace('.', ',')} EUR`],
+        ['Kraftstoffart', data.fuelType],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [41, 128, 185] }
+    });
+    if (data.receiptImage) {
+      const finalY = doc.lastAutoTable.finalY + 10;
+      doc.text('Tankbeleg Foto:', 20, finalY);
+      try { doc.addImage(data.receiptImage, 'JPEG', 20, finalY + 5, 80, 60); }
+      catch(e) { doc.text('Foto nicht verfügbar', 20, finalY + 15); }
+    }
+    doc.setFontSize(10);
+    doc.text('Herausgeber: GW Bauservice', 105, 280, { align: 'center' });
+    doc.save(`Ausgaben_${employee?.name || 'unbekannt'}_${currentDate}.pdf`);
+  }
+
+  function calculateOverview() {
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    const filtered = history.filter(item => {
+      const d = new Date(item.date);
+      return d >= start && d <= end;
+    });
+    const empfangenTotal = filtered.filter(i => i.type === 'empfangen').reduce((s, i) => s + i.amount, 0);
+    const ausgabenTotal = filtered.filter(i => i.type === 'ausgaben').reduce((s, i) => s + i.amount, 0);
+    return { empfangen: empfangenTotal, ausgaben: ausgabenTotal, differenz: empfangenTotal - ausgabenTotal, items: filtered };
+  }
+
+  function exportToExcel() {
+    const overview = calculateOverview();
+    const employee = employees.find(e => e.id === selectedEmployee);
+    const data = overview.items.map(item => ({
+      Datum: formatDate(item.date),
+      Typ: item.type === 'empfangen' ? 'Empfangen' : 'Ausgaben',
+      Betrag: item.amount,
+      Fahrzeug: item.type === 'ausgaben' ? (vehicles.find(v => v.id === item.vehicleId)?.licensePlate || '') : '',
+      Kilometerstand: item.type === 'ausgaben' ? item.mileage : '',
+      Kraftstoff: item.type === 'ausgaben' ? item.fuelType : ''
+    }));
+    data.push({
+      Datum: 'SUMME', Typ: '',
+      Betrag: overview.differenz,
+      Fahrzeug: `Empfangen: ${overview.empfangen.toFixed(2)} | Ausgaben: ${overview.ausgaben.toFixed(2)}`,
+      Kilometerstand: '', Kraftstoff: ''
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Übersicht');
+    XLSX.writeFile(wb, `Uebersicht_${employee?.name || 'unbekannt'}_${formatDate(new Date())}.xlsx`);
+  }
+
+  function exportOverviewToPDF() {
+    const overview = calculateOverview();
+    const employee = employees.find(e => e.id === selectedEmployee);
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('GW Bauservice - Übersicht', 105, 20, { align: 'center' });
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Mitarbeiter: ${employee?.name || ''}`, 20, 40);
+    doc.text(`Zeitraum: ${formatDate(startDate)} - ${formatDate(endDate)}`, 20, 50);
+    doc.autoTable({
+      startY: 60,
+      head: [['Beschreibung', 'Betrag (EUR)']],
+      body: [
+        ['Empfangen Gesamt', overview.empfangen.toFixed(2).replace('.', ',')],
+        ['Ausgaben Gesamt', overview.ausgaben.toFixed(2).replace('.', ',')],
+        ['Differenz', overview.differenz.toFixed(2).replace('.', ',')]
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [41, 128, 185] },
+      columnStyles: { 1: { halign: 'right' } }
+    });
+    const tableData = overview.items.map(item => [
+      formatDate(item.date),
+      item.type === 'empfangen' ? 'Empfangen' : 'Ausgaben',
+      item.amount.toFixed(2).replace('.', ',')
+    ]);
+    doc.autoTable({
+      startY: doc.lastAutoTable.finalY + 15,
+      head: [['Datum', 'Typ', 'Betrag']],
+      body: tableData,
+      theme: 'striped',
+      headStyles: { fillColor: [52, 73, 94] }
+    });
+    doc.save(`Uebersicht_${employee?.name || 'unbekannt'}_${formatDate(new Date())}.pdf`);
+  }
+
+  if (!fbReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+        <p className="text-gray-600 text-lg">Verbinde mit Firebase...</p>
+      </div>
+    );
+  }
+
+  const overview = selectedEmployee ? calculateOverview() : null;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      <header className="bg-white shadow-lg">
+        <div className="max-w-6xl mx-auto px-4 py-6">
+          <div className="text-center">
+            <div className="w-24 h-24 mx-auto mb-4 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full flex items-center justify-center shadow-md">
+              <span className="text-white text-3xl font-bold">GW</span>
+            </div>
+            <h1 className="text-4xl font-bold text-gray-800">Spritkosten</h1>
+            <p className="text-gray-600 mt-2">GW Bauservice - Zahna</p>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-4 py-8">
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">Mitarbeiter auswählen</h2>
+          <div className="flex flex-wrap gap-4">
+            <select
+              value={selectedEmployee}
+              onChange={(e) => setSelectedEmployee(e.target.value)}
+              className="flex-1 min-w-[200px] px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Bitte wählen...</option>
+              {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+            </select>
+            <button
+              onClick={() => setShowAddEmployee(!showAddEmployee)}
+              className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700"
+            >
+              + Neuer Mitarbeiter
+            </button>
+          </div>
+          {showAddEmployee && (
+            <div className="mt-4 p-4 bg-gray-50 rounded-lg flex gap-4">
+              <input
+                type="text"
+                value={newEmployeeName}
+                onChange={(e) => setNewEmployeeName(e.target.value)}
+                placeholder="Name eingeben"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg"
+              />
+              <button onClick={addEmployee} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                Hinzufügen
+              </button>
+            </div>
+          )}
+        </div>
+
+        {selectedEmployee && (
+          <div className="bg-white rounded-xl shadow-lg mb-6">
+            <div className="flex border-b">
+              {['empfangen','ausgaben','uebersicht'].map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`flex-1 px-6 py-4 font-medium ${activeTab === tab ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                >
+                  {tab === 'empfangen' && '📥 Empfangen'}
+                  {tab === 'ausgaben' && '📤 Ausgaben'}
+                  {tab === 'uebersicht' && '📊 Übersicht'}
+                </button>
+              ))}
+            </div>
+
+            <div className="p-6">
+              {activeTab === 'empfangen' && (
+                <div className="space-y-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Betrag (EUR)</label>
+                    <input
+                      type="number" step="0.01"
+                      value={empfangenAmount}
+                      onChange={(e) => setEmpfangenAmount(e.target.value)}
+                      placeholder="0,00"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Unterschrift des Empfängers</label>
+                    <div className="border-2 border-gray-300 rounded-lg overflow-hidden bg-white">
+                      <canvas ref={signatureCanvasRef} width={500} height={200} className="w-full" />
+                    </div>
+                    <button
+                      onClick={() => signaturePadRef.current?.clear()}
+                      className="mt-2 text-sm text-gray-600 hover:text-gray-800"
+                    >
+                      Löschen
+                    </button>
+                  </div>
+                  <button
+                    onClick={saveEmpfangen}
+                    className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                  >
+                    ✓ Quittung erstellen und speichern
+                  </button>
+                </div>
+              )}
+
+              {activeTab === 'ausgaben' && (
+                <div className="space-y-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Fahrzeug (Kennzeichen)</label>
+                    <div className="flex gap-4">
+                      <select
+                        value={ausgabenVehicle}
+                        onChange={(e) => setAusgabenVehicle(e.target.value)}
+                        className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
+                      >
+                        <option value="">Bitte wählen...</option>
+                        {vehicles.map(v => <option key={v.id} value={v.id}>{v.licensePlate}</option>)}
+                      </select>
+                      <button
+                        onClick={() => setShowAddVehicle(!showAddVehicle)}
+                        className="px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                      >+</button>
+                    </div>
+                    {showAddVehicle && (
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          type="text"
+                          value={newVehiclePlate}
+                          onChange={(e) => setNewVehiclePlate(e.target.value)}
+                          placeholder="Kennzeichen"
+                          className="flex-1 px-4 py-2 border border-gray-300 rounded-lg"
+                        />
+                        <button onClick={addVehicle} className="px-4 py-2 bg-blue-600 text-white rounded-lg">
+                          Hinzufügen
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Kilometerstand</label>
+                    <input
+                      type="number"
+                      value={ausgabenMileage}
+                      onChange={(e) => setAusgabenMileage(e.target.value)}
+                      placeholder="0"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Getankter Betrag (EUR)</label>
+                    <input
+                      type="number" step="0.01"
+                      value={ausgabenAmount}
+                      onChange={(e) => setAusgabenAmount(e.target.value)}
+                      placeholder="0,00"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Kraftstoffart</label>
+                    <button
+                      onClick={() => setShowFuelPopup(true)}
+                      className="w-full px-4 py-3 border-2 border-blue-300 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
+                    >
+                      {ausgabenFuelType || 'Bitte wählen...'}
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Tankbeleg fotografieren</label>
+                    {receiptImage ? (
+                      <div className="relative">
+                        <img src={receiptImage} alt="Tankbeleg" className="w-full max-h-64 object-contain rounded-lg border" />
+                        <button
+                          onClick={() => { setReceiptImage(''); setShowCamera(true); }}
+                          className="absolute top-2 right-2 px-3 py-1 bg-red-600 text-white rounded text-sm"
+                        >
+                          Neu aufnehmen
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setShowCamera(true)}
+                        className="w-full px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                      >
+                        📷 Kamera öffnen
+                      </button>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={saveAusgaben}
+                    className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                  >
+                    ✓ Beleg erstellen und speichern
+                  </button>
+                </div>
+              )}
+
+              {activeTab === 'uebersicht' && overview && (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Von</label>
+                      <input
+                        type="date" value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Bis</label>
+                      <input
+                        type="date" value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="bg-green-50 p-4 rounded-lg text-center">
+                      <p className="text-sm text-gray-600">Empfangen</p>
+                      <p className="text-2xl font-bold text-green-600">{overview.empfangen.toFixed(2).replace('.', ',')} €</p>
+                    </div>
+                    <div className="bg-red-50 p-4 rounded-lg text-center">
+                      <p className="text-sm text-gray-600">Ausgaben</p>
+                      <p className="text-2xl font-bold text-red-600">{overview.ausgaben.toFixed(2).replace('.', ',')} €</p>
+                    </div>
+                    <div className={`p-4 rounded-lg text-center ${overview.differenz >= 0 ? 'bg-blue-50' : 'bg-orange-50'}`}>
+                      <p className="text-sm text-gray-600">Differenz</p>
+                      <p className={`text-2xl font-bold ${overview.differenz >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>
+                        {overview.differenz.toFixed(2).replace('.', ',')} €
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <button onClick={exportToExcel} className="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                      📊 Als Excel exportieren
+                    </button>
+                    <button onClick={exportOverviewToPDF} className="flex-1 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700">
+                      📄 Als PDF exportieren
+                    </button>
+                  </div>
+
+                  {overview.items.length > 0 && (
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-800 mb-3">Historie</h3>
+                      <div className="space-y-2 max-h-96 overflow-y-auto">
+                        {overview.items.map(item => (
+                          <div key={item.id} className={`p-3 rounded-lg flex justify-between items-center ${item.type === 'empfangen' ? 'bg-green-50' : 'bg-red-50'}`}>
+                            <div>
+                              <p className="font-medium">{formatDate(item.date)}</p>
+                              <p className="text-sm text-gray-600">
+                                {item.type === 'empfangen' ? 'Empfangen' : 'Ausgaben'}
+                                {item.type === 'ausgaben' && ` - ${vehicles.find(v => v.id === item.vehicleId)?.licensePlate || ''}`}
+                              </p>
+                            </div>
+                            <p className={`font-bold ${item.type === 'empfangen' ? 'text-green-600' : 'text-red-600'}`}>
+                              {item.type === 'empfangen' ? '+' : '-'}{item.amount.toFixed(2).replace('.', ',')} €
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {showFuelPopup && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+            <h3 className="text-xl font-semibold mb-4">Kraftstoffart wählen</h3>
+            <div className="space-y-3">
+              {['Diesel', 'Benzin', 'Ad-Blue'].map(fuel => (
+                <button
+                  key={fuel}
+                  onClick={() => { setAusgabenFuelType(fuel); setShowFuelPopup(false); }}
+                  className="w-full px-6 py-4 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 font-medium"
+                >
+                  {fuel}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowFuelPopup(false)} className="mt-4 w-full px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">
+              Abbrechen
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showCamera && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4">
+            <h3 className="text-xl font-semibold mb-4">Tankbeleg fotografieren</h3>
+            <video ref={videoRef} autoPlay playsInline className="w-full rounded-lg bg-black" />
+            <div className="flex gap-4 mt-4">
+              <button onClick={capturePhoto} className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                📸 Foto aufnehmen
+              </button>
+              <button onClick={() => setShowCamera(false)} className="flex-1 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <footer className="bg-white border-t mt-12">
+        <div className="max-w-6xl mx-auto px-4 py-6 text-center text-gray-600">
+          <p>© 2026 GW Bauservice - Spritkostenverwaltung</p>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
