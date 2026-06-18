@@ -16,6 +16,7 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
   import { getDatabase, ref, push, get, remove, set } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
+  // HINWEIS: Schütze diese Daten in der Produktionsumgebung!
   const firebaseConfig = {
     apiKey: "AIzaSyB2KRg-aaN03pnRbhV6IoF-MGO6g1ezngI",
     authDomain: "spritkosten-e94fd.firebaseapp.com",
@@ -39,6 +40,13 @@
 <script type="text/babel" data-presets="env,react">
 const { useState, useRef, useEffect } = React;
 
+// Sicheres lokales Formatieren von Datumswerten ohne Zeitzonen-Offset
+function getLocalDateString(date = new Date()) {
+  const offset = date.getTimezoneOffset();
+  const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+  return localDate.toISOString().split('T')[0];
+}
+
 function formatDate(date) {
   if(!date) return "";
   const d = new Date(date);
@@ -51,6 +59,7 @@ function numberToWords(num) {
   const tens = ['', '', 'zwanzig', 'dreißig', 'vierzig', 'fünfzig', 'sechzig', 'siebzig', 'achtzig', 'neunzig'];
   let euroValue = Math.floor(num);
   const cents = Math.round((num - euroValue) * 100);
+  
   function convertUnder1000(n) {
     if (n < 10) return ones[n];
     if (n < 20) return teens[n - 10];
@@ -84,15 +93,15 @@ function App() {
   const [ausgabenMileage, setAusgabenMileage] = useState('');
   const [ausgabenVehicle, setAusgabenVehicle] = useState('');
   const [ausgabenFuelType, setAusgabenFuelType] = useState('');
-  const [ausgabenDate, setAusgabenDate] = useState(new Date().toISOString().split('T')[0]);
+  const [ausgabenDate, setAusgabenDate] = useState(getLocalDateString());
   
   const [showCamera, setShowCamera] = useState(false);
   const [receiptImage, setReceiptImage] = useState('');
   const [history, setHistory] = useState([]);
   const [newEmpName, setNewEmpName] = useState('');
   const [newVehPlate, setNewVehPlate] = useState('');
-  const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(`${new Date().getFullYear()}-01-01`);
+  const [endDate, setEndDate] = useState(getLocalDateString());
 
   const signatureCanvasRef = useRef(null);
   const signaturePadRef = useRef(null);
@@ -165,16 +174,22 @@ function App() {
     doc.setFont("helvetica", "bold"); doc.text(`Betrag: ${parseFloat(item.amount).toFixed(2)} EUR`, 20, 110);
     doc.setFont("helvetica", "normal"); doc.text(`In Worten: ${numberToWords(item.amount)}`, 20, 120);
     if (item.signature) { doc.text("Unterschrift:", 20, 150); doc.addImage(item.signature, 'PNG', 20, 155, 60, 30); }
-    doc.save(`Quittung_${emp?.name}.pdf`);
+    doc.save(`Quittung_${emp?.name || 'Mitarbeiter'}.pdf`);
   }
 
   function generateExpensePDF(item) {
     const { jsPDF } = window.jspdf; const doc = new jsPDF(); const emp = employees.find(e => e.id === item.employeeId); const veh = vehicles.find(v => v.id === item.vehicleId);
     doc.setFontSize(22); doc.text("GW Bauservice", 105, 20, { align: "center" });
     doc.setFontSize(14); doc.text("Tankbeleg", 105, 30, { align: "center" });
-    doc.autoTable({ startY: 50, head: [['Feld', 'Details']], body: [['Datum', formatDate(item.date)], ['Mitarbeiter', emp?.name || ''], ['Fahrzeug', veh?.licensePlate || ''], ['KM-Stand', item.mileage], ['Kraftstoff', item.fuelType], ['Betrag', `${parseFloat(item.amount).toFixed(2)} EUR`]] });
+    
+    doc.autoTable({ 
+      startY: 50, 
+      head: [['Feld', 'Details']], 
+      body: [['Datum', formatDate(item.date)], ['Mitarbeiter', emp?.name || ''], ['Fahrzeug', veh?.licensePlate || ''], ['KM-Stand', item.mileage || '-'], ['Kraftstoff', item.fuelType], ['Betrag', `${parseFloat(item.amount).toFixed(2)} EUR`]] 
+    });
+    
     if (item.receiptImage) { doc.addPage(); doc.addImage(item.receiptImage, 'JPEG', 20, 20, 170, 120); }
-    doc.save(`Tankbeleg_${emp?.name}.pdf`);
+    doc.save(`Tankbeleg_${emp?.name || 'Mitarbeiter'}.pdf`);
   }
 
   async function handleSaveEmpfangen() {
@@ -212,7 +227,6 @@ function App() {
             Kraftstoff: i.fuelType || 'Spritgeld'
         };
     });
-    // Summen hinzufügen
     data.push({});
     data.push({ Datum: 'SUMME ERHALT:', Betrag: stats.emp });
     data.push({ Datum: 'SUMME AUSGABE:', Betrag: stats.aus });
@@ -267,7 +281,7 @@ function App() {
           {employees.map(e => (
             <div key={e.id} onClick={() => setSelectedEmployee(e.id)} className={`p-4 rounded-xl border-2 cursor-pointer flex justify-between items-center transition-all ${selectedEmployee === e.id ? 'border-blue-500 bg-blue-50' : 'border-gray-100'}`}>
               <span className="font-medium">{e.name}</span>
-              <button onClick={(event) => deleteEmployee(e.id, event)} className="text-red-400">🗑️</button>
+              <button onClick={(event) => deleteEmployee(e.id, event)} className="text-red-400 p-1 hover:bg-gray-100 rounded">🗑️</button>
             </div>
           ))}
         </div>
@@ -308,7 +322,7 @@ function App() {
                   <input type="date" value={ausgabenDate} onChange={e => setAusgabenDate(e.target.value)} className="w-full p-3 bg-gray-50 rounded-lg border" />
                 </div>
                 <div className="grid grid-cols-2 gap-4"><input type="number" value={ausgabenMileage} onChange={e => setAusgabenMileage(e.target.value)} placeholder="KM-Stand" className="p-3 bg-gray-50 rounded-lg border" /><input type="number" value={ausgabenAmount} onChange={e => setAusgabenAmount(e.target.value)} placeholder="Betrag €" className="p-3 bg-gray-50 rounded-lg border" /></div>
-                <div className="grid grid-cols-3 gap-2">{['Diesel', 'Benzin', 'Ad-Blue'].map(f => (<button key={f} onClick={() => setAusgabenFuelType(f)} className={`p-3 rounded-lg font-bold border-2 ${ausgabenFuelType === f ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-gray-100'}`}>{f}</button>))}</div>
+                <div className="grid grid-cols-3 gap-2">{['Diesel', 'Benzin', 'Ad-Blue'].map(f => (<button key={f} type="button" onClick={() => setAusgabenFuelType(f)} className={`p-3 rounded-lg font-bold border-2 ${ausgabenFuelType === f ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-gray-100'}`}>{f}</button>))}</div>
                 <button onClick={startCamera} className="w-full py-6 border-2 border-dashed rounded-xl text-gray-400">{receiptImage ? "✓ Bild gespeichert" : "📷 Beleg fotografieren"}</button>
                 <button onClick={handleSaveAusgaben} className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold shadow-lg">Speichern</button>
               </div>
@@ -323,7 +337,7 @@ function App() {
                   {stats.items.map(item => (
                     <div key={item.id} className="p-3 bg-gray-50 rounded flex items-center justify-between border text-xs">
                       <div><p className="font-bold">{formatDate(item.date)}</p><p className="text-gray-400">{vehicles.find(v => v.id === item.vehicleId)?.licensePlate || 'Spritgeld'}</p></div>
-                      <div className="flex items-center gap-2"><span className="font-bold">{item.amount.toFixed(2)}€</span><button onClick={() => item.type === 'empfangen' ? generateReceiptPDF(item) : generateExpensePDF(item)} className="p-1 border rounded">PDF</button><button onClick={() => deleteHistoryItem(item)} className="p-1 border rounded text-red-500">🗑️</button></div>
+                      <div className="flex items-center gap-2"><span className="font-bold">{item.amount.toFixed(2)}€</span><button onClick={() => item.type === 'empfangen' ? generateReceiptPDF(item) : generateExpensePDF(item)} className="p-1 border rounded bg-white">PDF</button><button onClick={() => deleteHistoryItem(item)} className="p-1 border rounded text-red-500 bg-white">🗑️</button></div>
                     </div>
                   ))}
                 </div>
