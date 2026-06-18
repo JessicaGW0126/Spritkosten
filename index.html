@@ -7,17 +7,16 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-  import { getDatabase, ref, push, get, remove, set } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
-
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+<script>
   // HINWEIS: Schütze diese Daten in der Produktionsumgebung!
-  const firebaseConfig = {
+  var firebaseConfig = {
     apiKey: "AIzaSyB2KRg-aaN03pnRbhV6IoF-MGO6g1ezngI",
     authDomain: "spritkosten-e94fd.firebaseapp.com",
     databaseURL: "https://spritkosten-e94fd-default-rtdb.europe-west1.firebasedatabase.app",
@@ -28,16 +27,28 @@
     measurementId: "G-HC4K2N649J"
   };
 
-  const app = initializeApp(firebaseConfig);
-  const database = getDatabase(app);
-  window.firebaseDB = { database, ref, push, get, remove, set };
+  firebase.initializeApp(firebaseConfig);
+  var database = firebase.database();
+
+  // Dünner Wrapper, der dieselbe Aufruf-Signatur wie die modulare Firebase-API
+  // nachbildet, damit am restlichen App-Code (und an euren Daten) nichts
+  // geändert werden muss. Klassische <script>-Tags statt type="module" laufen
+  // zuverlässig auch über GitHub Pages, lokale Server und ältere Browser.
+  window.firebaseDB = {
+    database: database,
+    ref: function(db, path) { return db.ref(path); },
+    push: function(refObj, value) { return refObj.push(value); },
+    get: function(refObj) { return refObj.once('value'); },
+    remove: function(refObj) { return refObj.remove(); },
+    set: function(refObj, value) { return refObj.set(value); }
+  };
   window.dispatchEvent(new Event('firebase-ready'));
 </script>
 </head>
 <body class="bg-gray-50">
 <div id="root"></div>
 
-<script type="text/babel" data-presets="env,react">
+<script type="text/babel" data-presets="react">
 const { useState, useRef, useEffect } = React;
 
 // Sicheres lokales Formatieren von Datumswerten ohne Zeitzonen-Offset
@@ -358,6 +369,27 @@ function App() {
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App />);
+</script>
+
+<script>
+  // Sicherheitsnetz: Falls die App aus irgendeinem Grund (z.B. ein blockiertes
+  // CDN-Skript) nicht starten kann, bleibt die Seite nicht mehr stillschweigend
+  // weiß, sondern zeigt eine verständliche Fehlermeldung an.
+  window.addEventListener('error', function (e) {
+    console.error('Fehler beim Laden der App:', e.message, 'in', e.filename, 'Zeile', e.lineno);
+  });
+  setTimeout(function () {
+    var root = document.getElementById('root');
+    if (root && root.children.length === 0) {
+      root.innerHTML =
+        '<div style="max-width:600px;margin:60px auto;padding:24px;font-family:sans-serif;background:#fff3f3;border:1px solid #f5c2c2;border-radius:12px;color:#7f1d1d;">' +
+        '<h2 style="margin-top:0;">Die App konnte nicht geladen werden</h2>' +
+        '<p>Bitte öffne die Entwicklerkonsole (F12 → „Konsole“), um die genaue Fehlermeldung zu sehen. Häufige Ursachen: ' +
+        'ein Werbe-/Trackingblocker blockiert ein CDN-Skript (React, Babel, Firebase), eine Browser-Erweiterung greift ein, ' +
+        'oder die Seite wurde lokal per Doppelklick (file://) statt über GitHub Pages / einen Webserver geöffnet.</p>' +
+        '</div>';
+    }
+  }, 4000);
 </script>
 </body>
 </html>
